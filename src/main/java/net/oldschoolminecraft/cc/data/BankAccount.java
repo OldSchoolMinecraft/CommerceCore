@@ -23,6 +23,7 @@ public class BankAccount implements BusinessAccount
         this.accountName = accountName;
         this.balance = 0;
         this.withdrawLimit = 10_000;
+        this.trustees = new ArrayList<>();
     }
 
     public Business getHolder()
@@ -43,31 +44,31 @@ public class BankAccount implements BusinessAccount
     public boolean set(double v)
     {
         balance = v;
-        return save();
+        return true;
     }
 
     public boolean add(double v)
     {
         balance += v;
-        return save();
+        return true;
     }
 
     public boolean subtract(double v)
     {
         balance -= v;
-        return save();
+        return true;
     }
 
     public boolean multiply(double v)
     {
         balance *= v;
-        return save();
+        return true;
     }
 
     public boolean divide(double v)
     {
         balance /= v;
-        return save();
+        return true;
     }
 
     public boolean hasEnough(double v)
@@ -88,16 +89,5 @@ public class BankAccount implements BusinessAccount
     public boolean isNegative()
     {
         return balance < 0;
-    }
-
-    public boolean delete()
-    {
-        return true; // TODO: return whether or not the operation succeeded without errors
-    }
-
-    private boolean save()
-    {
-        //TODO: serialize to JSON and save to disk
-        return false; // TODO: return whether or not the disk write succeeded without errors
     }
 }

@@ -6,5 +6,4 @@ public interface BusinessAccount extends MutableBalance
 {
     String getAccountName();
     Business getHolder();
-    boolean delete();
 }
