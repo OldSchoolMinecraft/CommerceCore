@@ -4,6 +4,8 @@ import com.earth2me.essentials.api.Economy;
 import com.earth2me.essentials.api.NoLoanPermittedException;
 import com.earth2me.essentials.api.UserDoesNotExistException;
 import net.oldschoolminecraft.cc.CommerceCore;
+import net.oldschoolminecraft.cc.api.AccountResolver;
+import net.oldschoolminecraft.cc.api.DefaultAccountResolver;
 import net.oldschoolminecraft.cc.api.EssentialsAccount;
 import net.oldschoolminecraft.cc.api.NamedMutableBalance;
 import net.oldschoolminecraft.cc.contracts.LoanContract;
@@ -73,7 +75,7 @@ public class LoansCmd implements CommandExecutor
                 argumentOffset++;
 
             String accountName = args[1];
-            BankAccount bankAccount = plugin.getBankManager().getAccount(accountName);
+            BankAccount bankAccount = plugin.getBankManager().getAccount(business.name, accountName);
 
             NamedMutableBalance lender = businessLoan ? bankAccount : new EssentialsAccount(ply.getName());
             NamedMutableBalance borrower = new EssentialsAccount(args[1 + argumentOffset]);
@@ -83,6 +85,14 @@ public class LoansCmd implements CommandExecutor
             double principal = parsePercentage(interest);
             DurationValue deadlineDuration = DurationValue.parseDuration(deadline);
             LoanContract loanContract = new LoanContract(lender, borrower, principal, amount * (1.0 + principal), Instant.now().plus(deadlineDuration.amount(), deadlineDuration.unit()));
+
+            // setup the initial state of the loan and make sure the money is moved
+            lender.subtract(amount);
+            borrower.add(amount);
+            loanContract.fund();
+            loanContract.evaluate();
+
+            ply.sendMessage(ChatColor.RED + String.format("$%.2f has been transferred to %s!", amount, borrower.getAccountName()));
 
             try
             {
@@ -108,6 +118,9 @@ public class LoansCmd implements CommandExecutor
                 return true;
             }
 
+            NamedMutableBalance lender = loanContract.getResolvedLender();
+            NamedMutableBalance borrower = loanContract.getResolvedBorrower();
+
             double amount = loanContract.getRemainingBalance(); // full repayment amount
 
             if (args.length-1 == 1) // has amount specified
@@ -132,28 +145,26 @@ public class LoansCmd implements CommandExecutor
                 }
             }
 
-            try
+            if (!borrower.hasEnough(amount))
             {
-                if (!Economy.hasEnough(ply.getName(), amount))
-                {
-                    sender.sendMessage(ChatColor.RED + "You don't have enough money to make this repayment!");
-                    return true;
-                }
-
-                Economy.subtract(ply.getName(), amount);
-                loanContract.repay(amount);
-                String msgRaw = String.format("&aYou made a repayment of &7$%.2f&a successfully!", amount);
-                sender.sendMessage(ChatColor.translateAlternateColorCodes('&', msgRaw));
-
-                // evaluate loan to update its state
-                loanContract.evaluate();
-
-                if (loanContract.isRepaidByBorrower())
-                    sender.sendMessage(ChatColor.translateAlternateColorCodes('&', "&aYour debt is repaid and the contract is completed!"));
-                else sender.sendMessage(ChatColor.translateAlternateColorCodes('&', String.format("&eYour balance has &7$%.2f&e remaining!", loanContract.getRemainingBalance())));
-            } catch (UserDoesNotExistException | NoLoanPermittedException ex) {
-                sender.sendMessage(ChatColor.RED + ex.getMessage());
+                sender.sendMessage(ChatColor.RED + "You don't have enough money to make this repayment!");
+                return true;
             }
+
+            // move money
+            borrower.subtract(amount);
+            lender.add(amount);
+            loanContract.repay(amount);
+
+            String msgRaw = String.format("&aYou made a repayment of &7$%.2f&a successfully!", amount);
+            sender.sendMessage(ChatColor.translateAlternateColorCodes('&', msgRaw));
+
+            // evaluate loan to update its state
+            loanContract.evaluate();
+
+            if (loanContract.isRepaidByBorrower())
+                sender.sendMessage(ChatColor.translateAlternateColorCodes('&', "&aYour debt is repaid and the contract is completed!"));
+            else sender.sendMessage(ChatColor.translateAlternateColorCodes('&', String.format("&eYour balance has &7$%.2f&e remaining!", loanContract.getRemainingBalance())));
             return true;
         }
 

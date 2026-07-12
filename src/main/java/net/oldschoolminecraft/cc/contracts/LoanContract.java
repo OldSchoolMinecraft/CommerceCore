@@ -1,11 +1,6 @@
 package net.oldschoolminecraft.cc.contracts;
 
-import com.earth2me.essentials.api.Economy;
-import com.earth2me.essentials.api.NoLoanPermittedException;
-import com.earth2me.essentials.api.UserDoesNotExistException;
-import com.oldschoolminecraft.OSMEss.Handlers.PlayerDataHandler;
-import net.oldschoolminecraft.cc.CommerceCore;
-import net.oldschoolminecraft.cc.api.MutableBalance;
+import net.oldschoolminecraft.cc.api.AccountRef;
 import net.oldschoolminecraft.cc.api.NamedMutableBalance;
 import net.oldschoolminecraft.cc.util.PTUtil;
 
@@ -18,8 +13,10 @@ import java.util.concurrent.TimeUnit;
  * soon as the full repayment amount has been paid in, and auto-defaults once
  * the deadline passes with an outstanding balance.
  *
- * <p>Amounts are in the smallest unit of the server's currency (e.g. cents),
- * as {@code long}, to avoid floating point rounding issues.
+ * <p>Lender and borrower are stored as {@link AccountRef}s, not live
+ * {@link NamedMutableBalance} instances, so this contract serializes cleanly.
+ * Anywhere an actual balance needs to be read or mutated, the ref is resolved
+ * via {@link #resolver()} at the point of use.
  *
  * <p>Note: {@link #evaluate()} runs automatically after {@link #repay(double)},
  * so full repayment is always caught immediately. A missed deadline with
@@ -30,8 +27,8 @@ import java.util.concurrent.TimeUnit;
  */
 public final class LoanContract extends AbstractContract
 {
-    private final NamedMutableBalance lender;
-    private final NamedMutableBalance borrower;
+    private final AccountRef lender;
+    private final AccountRef borrower;
     private final double principal;
     private final double repaymentAmount;
     private final Instant repaymentDeadline;
@@ -53,8 +50,8 @@ public final class LoanContract extends AbstractContract
         if (lender.equals(borrower))
             throw new IllegalArgumentException("lender and borrower must be different players");
 
-        this.lender = lender;
-        this.borrower = borrower;
+        this.lender = AccountRef.of(lender);
+        this.borrower = AccountRef.of(borrower);
         this.principal = principal;
         this.repaymentAmount = repaymentAmount;
         this.repaymentDeadline = repaymentDeadline;
@@ -112,49 +109,77 @@ public final class LoanContract extends AbstractContract
         // handle what happens when borrower defaults on their loan
         if (getStatus() == ContractStatus.DEFAULTED)
         {
-            long lastLogin = PTUtil.getLastLogin(getBorrower());
+            NamedMutableBalance lenderAccount = resolver().resolve(lender);
+            NamedMutableBalance borrowerAccount = resolver().resolve(borrower);
 
-            if (lastLogin == -1) // failed to fetch playtime data, abort for now.
+            // The 30-day-absence forced deduction only makes sense for an
+            // actual player who can log in; businesses have no login concept.
+            if (borrower.getKind() == AccountRef.Kind.PLAYER)
             {
-                System.err.println("[CommerceCore] Failed to fetch playtime data when attempting to service loan for borrower: " + getBorrower() + "(ID: " + getContractId() + ")");
-                return;
-            }
+                long lastLogin = PTUtil.getLastLogin(getBorrower());
 
-            // if borrowers time since last login exceeds 30 days:
-            // deduct the full amount (even if borrower goes negative)
-            if (TimeUnit.MILLISECONDS.toDays((System.currentTimeMillis() - lastLogin)) >= 30)
-            {
-                try
+                if (lastLogin == -1) // failed to fetch playtime data, abort for now.
                 {
-                    Economy.subtract(getBorrower(), getRemainingBalance());
-                    repay(getRemainingBalance());
-                    transitionTo(ContractStatus.COMPLETED);
+                    System.err.println("[CommerceCore] Failed to fetch playtime data when attempting to service loan for borrower: " + getBorrower() + "(ID: " + getContractId() + ")");
                     return;
-                } catch (Exception ex) {
-                    System.err.println("[CommerceCore] Weird issue with processing loan repayment: " + ex.getMessage());
+                }
+
+                // if borrowers time since last login exceeds 30 days:
+                // deduct the full amount (even if borrower goes negative)
+                if (TimeUnit.MILLISECONDS.toDays((System.currentTimeMillis() - lastLogin)) >= 30)
+                {
+                    try
+                    {
+                        lenderAccount.add(getRemainingBalance());
+                        borrowerAccount.subtract(getRemainingBalance());
+                        repay(getRemainingBalance());
+                        transitionTo(ContractStatus.COMPLETED);
+                        return;
+                    } catch (Exception ex) {
+                        System.err.println("[CommerceCore] Weird issue with processing loan repayment: " + ex.getMessage());
+                    }
                 }
             }
 
-            try // attempt to deduct any incoming money from borrower balance util debt is repaid
+            // attempt to deduct any incoming money from borrower balance until debt is repaid
+            double borrowerBalance = borrowerAccount.balance();
+            if (borrowerBalance > 0.0D)
             {
-                double borrowerBalance = Economy.getMoney(getBorrower());
-                if (borrowerBalance > 0.0D)
-                {
-                    Economy.setMoney(getBorrower(), 0);
-                    repay(borrowerBalance);
-                }
-            } catch (UserDoesNotExistException | NoLoanPermittedException ignored) {}
+                lenderAccount.add(borrowerBalance);
+                borrowerAccount.set(0);
+                repay(borrowerBalance);
+            }
         }
     }
 
     public String getLender()
     {
-        return lender.getAccountName();
+        return lender.getName();
     }
 
     public String getBorrower()
     {
-        return borrower.getAccountName();
+        return borrower.getName();
+    }
+
+    public AccountRef getLenderRef()
+    {
+        return lender;
+    }
+
+    public AccountRef getBorrowerRef()
+    {
+        return borrower;
+    }
+
+    public NamedMutableBalance getResolvedLender()
+    {
+        return resolver().resolve(lender);
+    }
+
+    public NamedMutableBalance getResolvedBorrower()
+    {
+        return resolver().resolve(borrower);
     }
 
     public double getPrincipal()

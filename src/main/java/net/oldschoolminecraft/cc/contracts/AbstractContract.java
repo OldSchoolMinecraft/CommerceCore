@@ -1,5 +1,7 @@
 package net.oldschoolminecraft.cc.contracts;
 
+import net.oldschoolminecraft.cc.api.AccountResolver;
+
 import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
@@ -16,6 +18,14 @@ public abstract class AbstractContract
     private final UUID contractId;
     private final Instant createdAt;
     private ContractStatus status;
+
+    /**
+     * Not persisted. Contracts store {@code AccountRef}s (plain, serializable
+     * identity), never live {@code NamedMutableBalance} instances. This gets
+     * attached by ContractManager after construction/deserialization so
+     * subclasses can resolve their refs into live accounts on demand.
+     */
+    private transient AccountResolver accountResolver;
 
     protected AbstractContract(ContractType type)
     {
@@ -63,6 +73,24 @@ public abstract class AbstractContract
      * activity).
      */
     public abstract void evaluate();
+
+    /**
+     * Called by ContractManager once, right after this contract is created
+     * or loaded from disk. Must be called before any subclass logic that
+     * needs to resolve an AccountRef into a live account.
+     */
+    public final void attachAccountResolver(AccountResolver resolver)
+    {
+        this.accountResolver = Objects.requireNonNull(resolver, "resolver");
+    }
+
+    protected final AccountResolver resolver()
+    {
+        if (accountResolver == null)
+            throw new IllegalStateException("AccountResolver not attached to contract " + contractId
+                    + " — did ContractManager forget to call attachAccountResolver()?");
+        return accountResolver;
+    }
 
     /**
      * Called off by mutual agreement or admin action. Not valid once the
