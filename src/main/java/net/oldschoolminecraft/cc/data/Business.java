@@ -8,4 +8,5 @@ public class Business
     public String owner;
     public ArrayList<Employee> employees;
     public int payCycleDays; // 1-7 days
+    public String employeePayrollAccount;
 }

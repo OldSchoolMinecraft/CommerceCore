@@ -4,6 +4,7 @@ import com.earth2me.essentials.api.Economy;
 import com.earth2me.essentials.api.NoLoanPermittedException;
 import com.earth2me.essentials.api.UserDoesNotExistException;
 import com.google.gson.Gson;
+import net.oldschoolminecraft.cc.CommerceCore;
 import net.oldschoolminecraft.cc.contracts.AbstractContract;
 import net.oldschoolminecraft.cc.contracts.ContractStatus;
 import net.oldschoolminecraft.cc.contracts.ContractType;
@@ -21,12 +22,15 @@ import java.util.concurrent.locks.LockSupport;
 public class ContractManager
 {
     private static final Gson gson = new Gson();
+
+    private CommerceCore plugin;
     private File dataDir;
 
     private ArrayList<AbstractContract> contracts = new ArrayList<>();
 
-    public ContractManager(File dataDir)
+    public ContractManager(CommerceCore plugin, File dataDir)
     {
+        this.plugin = plugin;
         this.dataDir = dataDir;
     }
 
@@ -40,32 +44,20 @@ public class ContractManager
 
             for (AbstractContract contract : contracts)
             {
+                // evaluate the contract to update its state
                 contract.evaluate();
+
+                // if the contract is marked as completed, we can delete the file & release it from memory
                 if (contract.getStatus() == ContractStatus.COMPLETED)
                     toRemove.add(contract);
-                if (contract.getContractType() == ContractType.LOAN && contract.getStatus() == ContractStatus.DEFAULTED)
-                {
-                    // if borrowers time since last login exceeds 30 days:
-                    // deduct the full amount and put the borrowers balance in the negative
-                    //TODO
-
-                    try // attempt to deduct any incoming money from borrower balance util debt is repaid
-                    {
-                        LoanContract loanContract = (LoanContract) contract;
-                        double borrowerBalance = Economy.getMoney(loanContract.getBorrower());
-                        if (borrowerBalance > 0.0D)
-                        {
-                            Economy.setMoney(loanContract.getBorrower(), 0);
-                            loanContract.repay(borrowerBalance);
-                        }
-                    } catch (UserDoesNotExistException | NoLoanPermittedException ignored) {}
-                }
             }
 
             for (AbstractContract contract : toRemove)
             {
                 removeContract(contract);
             }
+
+            // wait 30 seconds until our next sweep
             LockSupport.parkNanos(TimeUnit.SECONDS.toNanos(30));
         }).start();
     }
@@ -80,6 +72,16 @@ public class ContractManager
     {
         deleteContract(new File(dataDir, contract.getContractId() + ".json"));
         contracts.remove(contract);
+    }
+
+    public LoanContract getLoanContractByBorrower(String name)
+    {
+        for (AbstractContract contract : contracts)
+        {
+            if (contract.getContractType() == ContractType.LOAN && ((LoanContract)contract).getBorrower().equalsIgnoreCase(name))
+                return (LoanContract) contract;
+        }
+        return null;
     }
 
     private void loadAllContracts()
