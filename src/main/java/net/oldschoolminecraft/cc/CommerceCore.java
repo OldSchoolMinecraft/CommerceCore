@@ -1,6 +1,10 @@
 package net.oldschoolminecraft.cc;
 
 import com.oldschoolminecraft.OSMEss.OSMEss;
+import net.oldschoolminecraft.cc.api.DefaultAccountResolver;
+import net.oldschoolminecraft.cc.commands.BusinessCmd;
+import net.oldschoolminecraft.cc.commands.LoansCmd;
+import net.oldschoolminecraft.cc.commands.TrusteesCmd;
 import net.oldschoolminecraft.cc.managers.BankManager;
 import net.oldschoolminecraft.cc.managers.BusinessManager;
 import net.oldschoolminecraft.cc.managers.ContractManager;
@@ -23,9 +27,13 @@ public class CommerceCore extends JavaPlugin
 
         osmEss = (OSMEss) getServer().getPluginManager().getPlugin("OSM-Ess");
 
+        getCommand("business").setExecutor(new BusinessCmd());
+        getCommand("loan").setExecutor(new LoansCmd(this));
+        getCommand("trustees").setExecutor(new TrusteesCmd());
+
         businessManager = new BusinessManager(this, new File(getDataFolder(), "business-data/"));
         bankManager = new BankManager(new File(getDataFolder(), "bank-data/"));
-        contractManager = new ContractManager(this, new File(getDataFolder(), "contract-data/"));
+        contractManager = new ContractManager(this, new File(getDataFolder(), "contract-data/"), new DefaultAccountResolver(this));
 
         contractManager.init();
 

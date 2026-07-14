@@ -8,6 +8,7 @@ import net.oldschoolminecraft.cc.api.AccountResolver;
 import net.oldschoolminecraft.cc.api.DefaultAccountResolver;
 import net.oldschoolminecraft.cc.api.EssentialsAccount;
 import net.oldschoolminecraft.cc.api.NamedMutableBalance;
+import net.oldschoolminecraft.cc.contracts.ContractStatus;
 import net.oldschoolminecraft.cc.contracts.LoanContract;
 import net.oldschoolminecraft.cc.data.BankAccount;
 import net.oldschoolminecraft.cc.data.Business;
@@ -82,9 +83,15 @@ public class LoansCmd implements CommandExecutor
             double amount = Double.parseDouble(args[2 + argumentOffset]);
             String interest = args[3 + argumentOffset];
             String deadline = args[4 + argumentOffset];
-            double principal = parsePercentage(interest);
             DurationValue deadlineDuration = DurationValue.parseDuration(deadline);
-            LoanContract loanContract = new LoanContract(lender, borrower, principal, amount * (1.0 + principal), Instant.now().plus(deadlineDuration.amount(), deadlineDuration.unit()));
+
+            LoanContract loanContract = new LoanContract(
+                    lender,
+                    borrower,
+                    amount,
+                    parsePercentage(interest),
+                    Instant.now().plus(deadlineDuration.amount(), deadlineDuration.unit())
+            );
 
             // setup the initial state of the loan and make sure the money is moved
             lender.subtract(amount);
@@ -165,6 +172,27 @@ public class LoansCmd implements CommandExecutor
             if (loanContract.isRepaidByBorrower())
                 sender.sendMessage(ChatColor.translateAlternateColorCodes('&', "&aYour debt is repaid and the contract is completed!"));
             else sender.sendMessage(ChatColor.translateAlternateColorCodes('&', String.format("&eYour balance has &7$%.2f&e remaining!", loanContract.getRemainingBalance())));
+            return true;
+        }
+
+        if (subcmd.equalsIgnoreCase("info"))
+        {
+            LoanContract loanContract = plugin.getContractManager().getLoanContractByBorrower(ply.getName());
+
+            if (loanContract == null)
+            {
+                ply.sendMessage(ChatColor.RED + "You don't have a loan contract!");
+                return true;
+            }
+
+            ply.sendMessage(ChatColor.YELLOW + String.format("Principal: $%.2f", loanContract.getPrincipal()));
+            ply.sendMessage(ChatColor.YELLOW + String.format("Remaining balance: $%.2f", loanContract.getRemainingBalance()));
+            ply.sendMessage(ChatColor.YELLOW + String.format("Deadline: %s", loanContract.getRepaymentDeadline()));
+
+            double suggested = loanContract.getSuggestedPeriodicPayment(7); // weekly reference plan
+            ply.sendMessage(ChatColor.GRAY + String.format(
+                    "Suggested (optional): $%.2f every 7 days would clear this by the deadline.", suggested));
+
             return true;
         }
 

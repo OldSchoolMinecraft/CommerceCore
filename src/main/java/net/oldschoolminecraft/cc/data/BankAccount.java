@@ -3,6 +3,7 @@ package net.oldschoolminecraft.cc.data;
 import net.oldschoolminecraft.cc.api.BusinessAccount;
 
 import java.util.ArrayList;
+import java.util.LinkedList;
 
 public class BankAccount implements BusinessAccount
 {
@@ -16,6 +17,9 @@ public class BankAccount implements BusinessAccount
      * This serves as both a list of trustees, and a map of their permission grants
      */
     public ArrayList<Trustee> trustees;
+
+    //TODO: use sqlite database file to hold ledger?
+    public LinkedList<AccountTransaction> transactionLedger;
 
     public BankAccount(Business holder, String accountName)
     {

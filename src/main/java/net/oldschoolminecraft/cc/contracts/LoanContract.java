@@ -3,48 +3,36 @@ package net.oldschoolminecraft.cc.contracts;
 import net.oldschoolminecraft.cc.api.AccountRef;
 import net.oldschoolminecraft.cc.api.NamedMutableBalance;
 import net.oldschoolminecraft.cc.util.PTUtil;
+import org.apache.poi.ss.formula.functions.Finance;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.concurrent.TimeUnit;
 
-/**
- * A loan between two players: the lender funds a principal, the borrower owes
- * back a (possibly larger) repayment amount by a deadline. Auto-completes as
- * soon as the full repayment amount has been paid in, and auto-defaults once
- * the deadline passes with an outstanding balance.
- *
- * <p>Lender and borrower are stored as {@link AccountRef}s, not live
- * {@link NamedMutableBalance} instances, so this contract serializes cleanly.
- * Anywhere an actual balance needs to be read or mutated, the ref is resolved
- * via {@link #resolver()} at the point of use.
- *
- * <p>Note: {@link #evaluate()} runs automatically after {@link #repay(double)},
- * so full repayment is always caught immediately. A missed deadline with
- * <em>no</em> further repayment activity won't trigger anything on its own —
- * pair this with a periodic sweep (e.g. a repeating Bukkit task that calls
- * {@code evaluate()} on all active loans) if you want defaults detected the
- * moment the deadline passes rather than the next time someone touches it.
- */
 public final class LoanContract extends AbstractContract
 {
     private final AccountRef lender;
     private final AccountRef borrower;
-    private final double principal;
-    private final double repaymentAmount;
+    private final double principal;       // fixed, original loan size -- for display only
+    private final double interestRate;    // fraction over full term, e.g. 0.02
     private final Instant repaymentDeadline;
 
     private boolean fundedByLender;
     private boolean repaidByBorrower;
-    private double amountRepaid;
+    private double amountRepaid;          // cumulative, for display/stats only
+    private Instant fundedAt;
 
-    public LoanContract(NamedMutableBalance lender, NamedMutableBalance borrower, double principal, double repaymentAmount, Instant repaymentDeadline)
+    private double outstandingBalance;    // what's actually still owed -- shrinks on repay(), grows on accrual
+    private long daysAccruedSoFar;        // whole days of compounding already folded into outstandingBalance
+
+    public LoanContract(NamedMutableBalance lender, NamedMutableBalance borrower, double principal, double interestRate, Instant repaymentDeadline)
     {
         super(ContractType.LOAN);
 
         if (principal <= 0)
             throw new IllegalArgumentException("principal must be positive");
-        if (repaymentAmount < principal)
-            throw new IllegalArgumentException("repaymentAmount cannot be less than principal");
+        if (interestRate < 0)
+            throw new IllegalArgumentException("interestRate cannot be negative");
         if (repaymentDeadline.isBefore(Instant.now()))
             throw new IllegalArgumentException("repaymentDeadline must be in the future");
         if (lender.equals(borrower))
@@ -53,51 +41,153 @@ public final class LoanContract extends AbstractContract
         this.lender = AccountRef.of(lender);
         this.borrower = AccountRef.of(borrower);
         this.principal = principal;
-        this.repaymentAmount = repaymentAmount;
+        this.interestRate = interestRate;
         this.repaymentDeadline = repaymentDeadline;
         this.fundedByLender = false;
         this.repaidByBorrower = false;
         this.amountRepaid = 0D;
+        this.outstandingBalance = principal;
+        this.daysAccruedSoFar = 0L;
     }
 
-    /**
-     * Marks the loan as funded by the lender and activates it. Call this once
-     * the principal has actually been transferred to the borrower.
-     */
     public void fund()
     {
         requireStatus(ContractStatus.PENDING);
         this.fundedByLender = true;
+        this.fundedAt = Instant.now();
         transitionTo(ContractStatus.ACTIVE);
     }
 
     /**
-     * Records a repayment from the borrower. Automatically completes the loan
-     * if this payment brings the total repaid to (or past) the repayment
-     * amount, and automatically marks it defaulted if the deadline has
-     * already passed.
-     *
-     * @param amount amount repaid, must be positive
+     * Records a repayment of any size, at any time. Interest owed up to this
+     * moment is folded into the outstanding balance FIRST, then the
+     * repayment is subtracted -- so paying early or paying more than the
+     * minimum genuinely reduces future interest, rather than being netted
+     * off only at the deadline.
      */
     public void repay(double amount)
     {
-        requireStatus(ContractStatus.ACTIVE);
+        requireStatus(ContractStatus.ACTIVE, ContractStatus.DEFAULTED);
         if (amount <= 0)
             throw new IllegalArgumentException("repayment amount must be positive");
+
+        accrueToNow();
+        outstandingBalance -= amount;
         amountRepaid += amount;
         evaluate();
     }
 
+    /** Nth root of the full-term multiplier -- constant for the loan's life. */
+    private double dailyCompoundRate(long totalDays)
+    {
+        if (totalDays <= 0)
+            return 0D;
+        return Math.pow(1.0 + interestRate, 1.0 / totalDays) - 1.0;
+    }
+
+    private long daysSinceFundingCapped(long totalDays)
+    {
+        long daysSinceFunding = Duration.between(fundedAt, Instant.now()).toDays();
+        if (daysSinceFunding < 0) daysSinceFunding = 0;
+        return Math.min(daysSinceFunding, totalDays);
+    }
+
+    /** Pure read -- projects the balance with pending interest folded in, without mutating state. */
+    private double projectCurrentBalance()
+    {
+        if (fundedAt == null || interestRate == 0D)
+            return outstandingBalance;
+
+        long totalDays = Duration.between(fundedAt, repaymentDeadline).toDays();
+        if (totalDays <= 0)
+            return outstandingBalance;
+
+        long targetDays = daysSinceFundingCapped(totalDays);
+        long newDays = targetDays - daysAccruedSoFar;
+        if (newDays <= 0)
+            return outstandingBalance;
+
+        double dailyRate = dailyCompoundRate(totalDays);
+        return Finance.fv(dailyRate, (int) newDays, 0D, -outstandingBalance, 0);
+    }
+
+    /** Mutating -- folds interest since the last checkpoint into outstandingBalance. */
+    private void accrueToNow()
+    {
+        if (fundedAt == null || interestRate == 0D)
+            return;
+
+        long totalDays = Duration.between(fundedAt, repaymentDeadline).toDays();
+        if (totalDays <= 0)
+            return;
+
+        long targetDays = daysSinceFundingCapped(totalDays);
+        long newDays = targetDays - daysAccruedSoFar;
+        if (newDays <= 0)
+            return;
+
+        double dailyRate = dailyCompoundRate(totalDays);
+        outstandingBalance = Finance.fv(dailyRate, (int) newDays, 0D, -outstandingBalance, 0);
+        daysAccruedSoFar = targetDays;
+    }
+
+    public double getCurrentAmountOwed()
+    {
+        return projectCurrentBalance();
+    }
+
+    public double getAccruedInterest()
+    {
+        double principalOnlyRemaining = Math.max(0D, principal - amountRepaid);
+        return Math.max(0D, getRemainingBalance() - principalOnlyRemaining);
+    }
+
+    /** Worst case if the loan runs its full term with zero repayments -- unaffected by actual repayment activity. */
+    public double getFullTermAmountOwed()
+    {
+        return principal * (1.0 + interestRate);
+    }
+
     /**
-     * Re-checks completion/default conditions. Safe to call repeatedly and
-     * from a scheduled task; a no-op once the loan is in a terminal state.
+     * ADVISORY ONLY -- never enforced. Suggests a fixed payment every
+     * {@code intervalDays} days, against the CURRENT remaining balance, that
+     * would clear the loan by the deadline, via Finance.pmt(). Repayment
+     * behavior in this system is entirely unaffected by this number.
      */
+    public double getSuggestedPeriodicPayment(int intervalDays)
+    {
+        if (intervalDays <= 0)
+            throw new IllegalArgumentException("intervalDays must be positive");
+
+        double remaining = getRemainingBalance();
+        if (remaining <= 0D)
+            return 0D;
+
+        long daysLeft = Duration.between(Instant.now(), repaymentDeadline).toDays();
+        if (daysLeft <= 0)
+            return remaining;
+
+        int numberOfPayments = (int) Math.max(1, Math.ceil((double) daysLeft / intervalDays));
+
+        long totalDays = Duration.between(fundedAt != null ? fundedAt : Instant.now(), repaymentDeadline).toDays();
+        double dailyRate = dailyCompoundRate(Math.max(totalDays, 1));
+        double intervalRate = Math.pow(1.0 + dailyRate, intervalDays) - 1.0;
+
+        if (intervalRate == 0D)
+            return remaining / numberOfPayments; // same 0%-rate divide-by-zero Finance.fv() has
+
+        return -Finance.pmt(intervalRate, numberOfPayments, remaining);
+    }
+
     @Override
     public void evaluate()
     {
         if (getStatus() != ContractStatus.ACTIVE)
             return;
-        if (amountRepaid >= repaymentAmount)
+
+        accrueToNow();
+
+        if (outstandingBalance <= 0D)
         {
             repaidByBorrower = true;
             transitionTo(ContractStatus.COMPLETED);
@@ -105,122 +195,60 @@ public final class LoanContract extends AbstractContract
         }
         if (Instant.now().isAfter(repaymentDeadline))
             transitionTo(ContractStatus.DEFAULTED);
+    }
 
-        // handle what happens when borrower defaults on their loan
-        if (getStatus() == ContractStatus.DEFAULTED)
+    private void handleDefault()
+    {
+        requireStatus(ContractStatus.DEFAULTED);
+        NamedMutableBalance lenderAccount = resolver().resolve(lender);
+        NamedMutableBalance borrowerAccount = resolver().resolve(borrower);
+
+        if (borrower.getKind() == AccountRef.Kind.PLAYER)
         {
-            NamedMutableBalance lenderAccount = resolver().resolve(lender);
-            NamedMutableBalance borrowerAccount = resolver().resolve(borrower);
+            long lastLogin = PTUtil.getLastLogin(getBorrower());
 
-            // The 30-day-absence forced deduction only makes sense for an
-            // actual player who can log in; businesses have no login concept.
-            if (borrower.getKind() == AccountRef.Kind.PLAYER)
+            if (lastLogin == -1)
             {
-                long lastLogin = PTUtil.getLastLogin(getBorrower());
+                System.err.println("[CommerceCore] Failed to fetch playtime data when attempting to service loan for borrower: " + getBorrower() + "(ID: " + getContractId() + ")");
+                return;
+            }
 
-                if (lastLogin == -1) // failed to fetch playtime data, abort for now.
+            if (TimeUnit.MILLISECONDS.toDays((System.currentTimeMillis() - lastLogin)) >= 30)
+            {
+                try
                 {
-                    System.err.println("[CommerceCore] Failed to fetch playtime data when attempting to service loan for borrower: " + getBorrower() + "(ID: " + getContractId() + ")");
+                    lenderAccount.add(getRemainingBalance());
+                    borrowerAccount.subtract(getRemainingBalance());
+                    repay(getRemainingBalance());
+                    transitionTo(ContractStatus.COMPLETED);
                     return;
-                }
-
-                // if borrowers time since last login exceeds 30 days:
-                // deduct the full amount (even if borrower goes negative)
-                if (TimeUnit.MILLISECONDS.toDays((System.currentTimeMillis() - lastLogin)) >= 30)
-                {
-                    try
-                    {
-                        lenderAccount.add(getRemainingBalance());
-                        borrowerAccount.subtract(getRemainingBalance());
-                        repay(getRemainingBalance());
-                        transitionTo(ContractStatus.COMPLETED);
-                        return;
-                    } catch (Exception ex) {
-                        System.err.println("[CommerceCore] Weird issue with processing loan repayment: " + ex.getMessage());
-                    }
+                } catch (Exception ex) {
+                    System.err.println("[CommerceCore] Weird issue with processing loan repayment: " + ex.getMessage());
                 }
             }
+        }
 
-            // attempt to deduct any incoming money from borrower balance until debt is repaid
-            double borrowerBalance = borrowerAccount.balance();
-            if (borrowerBalance > 0.0D)
-            {
-                lenderAccount.add(borrowerBalance);
-                borrowerAccount.set(0);
-                repay(borrowerBalance);
-            }
+        double borrowerBalance = borrowerAccount.balance();
+        if (borrowerBalance > 0.0D)
+        {
+            lenderAccount.add(borrowerBalance);
+            borrowerAccount.set(0);
+            repay(borrowerBalance);
         }
     }
 
-    public String getLender()
-    {
-        return lender.getName();
-    }
-
-    public String getBorrower()
-    {
-        return borrower.getName();
-    }
-
-    public AccountRef getLenderRef()
-    {
-        return lender;
-    }
-
-    public AccountRef getBorrowerRef()
-    {
-        return borrower;
-    }
-
-    public NamedMutableBalance getResolvedLender()
-    {
-        return resolver().resolve(lender);
-    }
-
-    public NamedMutableBalance getResolvedBorrower()
-    {
-        return resolver().resolve(borrower);
-    }
-
-    public double getPrincipal()
-    {
-        return principal;
-    }
-
-    public double getRepaymentAmount()
-    {
-        return repaymentAmount;
-    }
-
-    public Instant getRepaymentDeadline()
-    {
-        return repaymentDeadline;
-    }
-
-    public boolean isFundedByLender()
-    {
-        return fundedByLender;
-    }
-
-    public boolean isRepaidByBorrower()
-    {
-        return repaidByBorrower;
-    }
-
-    public double getAmountRepaid()
-    {
-        return amountRepaid;
-    }
-
-    public double getRemainingBalance()
-    {
-        return Math.max(0L, repaymentAmount - amountRepaid);
-    }
-
-    public boolean isOverdue()
-    {
-        return getStatus() == ContractStatus.ACTIVE && Instant.now().isAfter(repaymentDeadline);
-    }
+    public String getLender() { return lender.getName(); }
+    public String getBorrower() { return borrower.getName(); }
+    public NamedMutableBalance getResolvedLender() { return resolver().resolve(lender); }
+    public NamedMutableBalance getResolvedBorrower() { return resolver().resolve(borrower); }
+    public double getPrincipal() { return principal; }
+    public double getInterestRate() { return interestRate; }
+    public Instant getRepaymentDeadline() { return repaymentDeadline; }
+    public boolean isFundedByLender() { return fundedByLender; }
+    public boolean isRepaidByBorrower() { return repaidByBorrower; }
+    public double getAmountRepaid() { return amountRepaid; }
+    public double getRemainingBalance() { return Math.max(0D, projectCurrentBalance()); }
+    public boolean isOverdue() { return getStatus() == ContractStatus.ACTIVE && Instant.now().isAfter(repaymentDeadline); }
 
     @Override
     public String toString()
@@ -231,7 +259,8 @@ public final class LoanContract extends AbstractContract
                 ", lender=" + lender +
                 ", borrower=" + borrower +
                 ", principal=" + principal +
-                ", repaymentAmount=" + repaymentAmount +
+                ", interestRate=" + interestRate +
+                ", outstandingBalance=" + getRemainingBalance() +
                 ", amountRepaid=" + amountRepaid +
                 ", deadline=" + repaymentDeadline +
                 '}';

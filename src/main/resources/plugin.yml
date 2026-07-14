@@ -1,0 +1,16 @@
+name: CommerceCore
+version: 1.0
+author: moderator_man
+main: net.oldschoolminecraft.cc.CommerceCore
+commands:
+  business:
+    description: Manage your business
+    usage: /business
+  loans:
+    description: Create or repay loans
+    usage: /loans
+    aliases:
+      - 'b-loan'
+  trustees:
+    description: Manage business account trustees
+    usage: /trustees

@@ -3,6 +3,7 @@ package net.oldschoolminecraft.cc.contracts;
 import net.oldschoolminecraft.cc.api.AccountResolver;
 
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -111,6 +112,20 @@ public abstract class AbstractContract
     {
         if (this.status != expected)
             throw new IllegalStateException("Expected contract " + contractId + " to be " + expected + " but was " + status);
+    }
+
+    protected final void requireStatus(ContractStatus... allowedStates)
+    {
+        boolean pass = false;
+        for (ContractStatus expected : allowedStates)
+        {
+            if (status == expected)
+            {
+                pass = true;
+                break;
+            }
+        }
+        if (!pass) throw new IllegalStateException("Expected contract " + contractId + " to be " + Arrays.toString(allowedStates) + " but was " + status);
     }
 
     protected final void requireNotTerminal(String action)
