@@ -220,7 +220,7 @@ public class ExchangeManager extends Thread
             ps.setInt(7, quantity);
             ps.setInt(8, quantity);
             ps.setDouble(9, price);
-            ps.setString(10, ExchangeOrder.Status.OPEN.name());
+            ps.setString(10, archive ? ExchangeOrder.Status.FULFILLED.name() : ExchangeOrder.Status.OPEN.name());
             ps.setLong(11, System.currentTimeMillis());
             ps.executeUpdate();
         }
