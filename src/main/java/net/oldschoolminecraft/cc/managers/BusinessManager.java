@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import net.oldschoolminecraft.cc.CommerceCore;
 import net.oldschoolminecraft.cc.data.Business;
 import net.oldschoolminecraft.cc.util.BusinessOwnerIndex;
+import org.bukkit.Bukkit;
 
 import java.io.File;
 import java.io.FileReader;
@@ -17,8 +18,11 @@ public class BusinessManager
     public BusinessManager(CommerceCore plugin, File dataDir)
     {
         this.dataDir = dataDir;
-        this.ownerIndex = new BusinessOwnerIndex(plugin);
-        this.ownerIndex.refresh();
+        Bukkit.getScheduler().scheduleAsyncDelayedTask(plugin, () ->
+        {
+            this.ownerIndex = new BusinessOwnerIndex(plugin);
+            this.ownerIndex.refresh();
+        }, 20L);
     }
 
     public void processEmployeePayment()

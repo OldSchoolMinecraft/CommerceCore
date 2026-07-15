@@ -1,5 +1,6 @@
 package net.oldschoolminecraft.cc.commands;
 
+import net.oldschoolminecraft.cc.CommerceCore;
 import org.bukkit.ChatColor;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
@@ -7,9 +8,22 @@ import org.bukkit.command.CommandSender;
 
 public class TrusteesCmd implements CommandExecutor
 {
+    private CommerceCore plugin;
+
+    public TrusteesCmd(CommerceCore plugin)
+    {
+        this.plugin = plugin;
+    }
+
     @Override
     public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args)
     {
+        if (!plugin.getConfig().getBoolean("commands.trustees.enabled", true))
+        {
+            sender.sendMessage(ChatColor.RED + "This command has been disabled by the system administrator!");
+            return true;
+        }
+
         if (args.length == 0)
         {
             //TODO: send help

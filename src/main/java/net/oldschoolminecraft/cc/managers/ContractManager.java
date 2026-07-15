@@ -40,6 +40,7 @@ public class ContractManager extends Thread
 
     public void init()
     {
+        dataDir.mkdirs();
         loadAllContracts();
         start();
     }

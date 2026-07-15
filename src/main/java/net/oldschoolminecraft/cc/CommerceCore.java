@@ -10,6 +10,7 @@ import net.oldschoolminecraft.cc.managers.BankManager;
 import net.oldschoolminecraft.cc.managers.BusinessManager;
 import net.oldschoolminecraft.cc.managers.ContractManager;
 import net.oldschoolminecraft.cc.managers.ExchangeManager;
+import net.oldschoolminecraft.cc.util.CoreConfig;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.io.File;
@@ -21,6 +22,7 @@ public class CommerceCore extends JavaPlugin
     private static final Logger logger = Logger.getLogger("CommerceCore");
 
     private AccountResolver accountResolver;
+    private CoreConfig config;
 
     private BusinessManager businessManager;
     private BankManager bankManager;
@@ -29,7 +31,10 @@ public class CommerceCore extends JavaPlugin
 
     public void onEnable()
     {
+        getDataFolder().mkdirs();
+
         accountResolver = new DefaultAccountResolver(this);
+        config = new CoreConfig(new File(getDataFolder(), "config.yml"));
 
         businessManager = new BusinessManager(this, new File(getDataFolder(), "business-data/"));
         bankManager = new BankManager(new File(getDataFolder(), "bank-data/"));
@@ -44,12 +49,13 @@ public class CommerceCore extends JavaPlugin
             return;
         }
 
-        getCommand("business").setExecutor(new BusinessCmd());
-        getCommand("loan").setExecutor(new LoansCmd(this));
-        getCommand("trustees").setExecutor(new TrusteesCmd());
+        getCommand("business").setExecutor(new BusinessCmd(this));
+        getCommand("loans").setExecutor(new LoansCmd(this));
+        getCommand("trustees").setExecutor(new TrusteesCmd(this));
         getCommand("exchange").setExecutor(new ExchangeCmd(this));
 
         contractManager.init();
+        exchangeManager.init();
 
         System.out.println("CommerceCore enabled");
     }
@@ -95,5 +101,10 @@ public class CommerceCore extends JavaPlugin
     public Logger getLogger()
     {
         return logger;
+    }
+
+    public CoreConfig getConfig()
+    {
+        return config;
     }
 }

@@ -34,6 +34,12 @@ public class LoansCmd implements CommandExecutor
     @Override
     public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args)
     {
+        if (!plugin.getConfig().getBoolean("commands.loans.enabled", true))
+        {
+            sender.sendMessage(ChatColor.RED + "This command has been disabled by the system administrator!");
+            return true;
+        }
+
         if (!(sender instanceof Player))
         {
             sender.sendMessage(ChatColor.RED + "You must be a player!");

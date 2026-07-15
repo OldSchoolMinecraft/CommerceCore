@@ -10,7 +10,7 @@ public class Database
 
     public Database(String file) throws SQLException
     {
-        connection = DriverManager.getConnection("jdbc:sqlite:file://" + file);
+        connection = DriverManager.getConnection("jdbc:sqlite:" + file);
     }
 
     public Connection connection()

@@ -14,3 +14,8 @@ commands:
   trustees:
     description: Manage business account trustees
     usage: /trustees
+  exchange:
+    description: Manage buy/sell orders on the grand exchange
+    usage: /exchange
+    aliases:
+      - gex

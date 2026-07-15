@@ -5,11 +5,11 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.SignChangeEvent;
 
-public class ChestShopListener implements Listener
+public class SignListener implements Listener
 {
     private CommerceCore plugin;
 
-    public ChestShopListener(CommerceCore plugin)
+    public SignListener(CommerceCore plugin)
     {
         this.plugin = plugin;
     }

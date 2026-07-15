@@ -3,6 +3,7 @@ package net.oldschoolminecraft.cc.commands;
 import net.oldschoolminecraft.cc.CommerceCore;
 import net.oldschoolminecraft.cc.api.AccountRef;
 import net.oldschoolminecraft.cc.api.AccountResolver;
+import net.oldschoolminecraft.cc.api.EssentialsAccount;
 import net.oldschoolminecraft.cc.data.ExchangeOrder;
 import net.oldschoolminecraft.cc.managers.ExchangeManager;
 import org.bukkit.ChatColor;
@@ -31,6 +32,12 @@ public class ExchangeCmd implements CommandExecutor
     @Override
     public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args)
     {
+        if (!plugin.getConfig().getBoolean("commands.exchange.enabled", true))
+        {
+            sender.sendMessage(ChatColor.RED + "This command has been disabled by the system administrator!");
+            return true;
+        }
+
         if (args.length == 0)
         {
             sendUsage(sender, label);
@@ -184,8 +191,16 @@ public class ExchangeCmd implements CommandExecutor
         }
 
         String orderID = args[1];
+        boolean success = exchangeManager.cancelOrder(orderID, AccountRef.of(new EssentialsAccount(player.getName())));
+        if (success)
+        {
+            sender.sendMessage(ChatColor.RED + "Successfully cancelled your order!");
+            return true;
+        }
 
-        exchangeManager.cancelOrder(orderID, );
+        sender.sendMessage(ChatColor.RED + "There was a hiccup while trying to cancel your order!");
+
+        return true;
     }
 
     // ------------------------------------------------------------------
