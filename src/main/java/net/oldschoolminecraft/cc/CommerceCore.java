@@ -1,39 +1,53 @@
 package net.oldschoolminecraft.cc;
 
-import com.oldschoolminecraft.OSMEss.OSMEss;
+import net.oldschoolminecraft.cc.api.AccountResolver;
 import net.oldschoolminecraft.cc.api.DefaultAccountResolver;
 import net.oldschoolminecraft.cc.commands.BusinessCmd;
+import net.oldschoolminecraft.cc.commands.ExchangeCmd;
 import net.oldschoolminecraft.cc.commands.LoansCmd;
 import net.oldschoolminecraft.cc.commands.TrusteesCmd;
 import net.oldschoolminecraft.cc.managers.BankManager;
 import net.oldschoolminecraft.cc.managers.BusinessManager;
 import net.oldschoolminecraft.cc.managers.ContractManager;
+import net.oldschoolminecraft.cc.managers.ExchangeManager;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.io.File;
+import java.sql.SQLException;
+import java.util.logging.Logger;
 
 public class CommerceCore extends JavaPlugin
 {
-    private static File dataFolder;
-    private static OSMEss osmEss;
+    private static final Logger logger = Logger.getLogger("CommerceCore");
+
+    private AccountResolver accountResolver;
 
     private BusinessManager businessManager;
     private BankManager bankManager;
     private ContractManager contractManager;
+    private ExchangeManager exchangeManager;
 
     public void onEnable()
     {
-        dataFolder = getDataFolder();
+        accountResolver = new DefaultAccountResolver(this);
 
-        osmEss = (OSMEss) getServer().getPluginManager().getPlugin("OSM-Ess");
+        businessManager = new BusinessManager(this, new File(getDataFolder(), "business-data/"));
+        bankManager = new BankManager(new File(getDataFolder(), "bank-data/"));
+        contractManager = new ContractManager(this, new File(getDataFolder(), "contract-data/"));
+
+        try
+        {
+            exchangeManager = new ExchangeManager(this);
+        } catch (SQLException ex) {
+            ex.printStackTrace(System.err);
+            getServer().getPluginManager().disablePlugin(this);
+            return;
+        }
 
         getCommand("business").setExecutor(new BusinessCmd());
         getCommand("loan").setExecutor(new LoansCmd(this));
         getCommand("trustees").setExecutor(new TrusteesCmd());
-
-        businessManager = new BusinessManager(this, new File(getDataFolder(), "business-data/"));
-        bankManager = new BankManager(new File(getDataFolder(), "bank-data/"));
-        contractManager = new ContractManager(this, new File(getDataFolder(), "contract-data/"), new DefaultAccountResolver(this));
+        getCommand("exchange").setExecutor(new ExchangeCmd(this));
 
         contractManager.init();
 
@@ -42,6 +56,14 @@ public class CommerceCore extends JavaPlugin
 
     public void onDisable()
     {
+        businessManager = null;
+        bankManager = null;
+
+        contractManager.shutdown();
+        contractManager = null;
+
+        exchangeManager = null;
+
         System.out.println("CommerceCore disabled");
     }
 
@@ -60,13 +82,18 @@ public class CommerceCore extends JavaPlugin
         return contractManager;
     }
 
-    public static OSMEss static_getOSMEss()
+    public ExchangeManager getExchangeManager()
     {
-        return osmEss;
+        return exchangeManager;
     }
 
-    public static File static_getDataFolder()
+    public AccountResolver getAccountResolver()
     {
-        return dataFolder;
+        return accountResolver;
+    }
+
+    public Logger getLogger()
+    {
+        return logger;
     }
 }

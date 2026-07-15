@@ -18,7 +18,7 @@ import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.LockSupport;
 
-public class ContractManager
+public class ContractManager extends Thread
 {
     private static final Gson gson = new GsonBuilder()
             .registerTypeAdapter(AbstractContract.class, new ContractTypeAdapter())
@@ -31,57 +31,59 @@ public class ContractManager
     private ArrayList<AbstractContract> contracts = new ArrayList<>();
     private volatile boolean running = true;
 
-    public ContractManager(CommerceCore plugin, File dataDir, AccountResolver accountResolver)
+    public ContractManager(CommerceCore plugin, File dataDir)
     {
         this.plugin = plugin;
         this.dataDir = dataDir;
-        this.accountResolver = accountResolver;
+        this.accountResolver = plugin.getAccountResolver();
     }
 
     public void init()
     {
         loadAllContracts();
+        start();
+    }
 
-        new Thread(() ->
+    public void run()
+    {
+        while (running)
         {
-            while (running)
+            ArrayList<AbstractContract> toRemove = new ArrayList<>();
+
+            for (AbstractContract contract : contracts)
             {
-                ArrayList<AbstractContract> toRemove = new ArrayList<>();
+                // evaluate the contract to update its state
+                contract.evaluate();
 
-                for (AbstractContract contract : contracts)
+                // persist in case evaluate() changed state (e.g. ACTIVE -> DEFAULTED)
+                // so a mid-sweep server restart doesn't lose that transition
+                // or, worse, re-apply an already-recorded forced repayment.
+                try
                 {
-                    // evaluate the contract to update its state
-                    contract.evaluate();
-
-                    // persist in case evaluate() changed state (e.g. ACTIVE -> DEFAULTED)
-                    // so a mid-sweep server restart doesn't lose that transition
-                    // or, worse, re-apply an already-recorded forced repayment.
-                    try
-                    {
-                        saveContract(contract);
-                    } catch (IOException e) {
-                        System.err.println("[CommerceCore] Failed to persist contract " + contract.getContractId() + " during sweep: " + e.getMessage());
-                    }
-
-                    // if the contract is marked as completed, we can delete the file & release it from memory
-                    if (contract.getStatus() == ContractStatus.COMPLETED)
-                        toRemove.add(contract);
+                    saveContract(contract);
+                } catch (IOException e) {
+                    System.err.println("[CommerceCore] Failed to persist contract " + contract.getContractId() + " during sweep: " + e.getMessage());
                 }
 
-                for (AbstractContract contract : toRemove)
-                {
-                    removeContract(contract);
-                }
-
-                // wait 30 seconds until our next sweep
-                LockSupport.parkNanos(TimeUnit.SECONDS.toNanos(30));
+                // if the contract is marked as completed, we can delete the file & release it from memory
+                if (contract.getStatus() == ContractStatus.COMPLETED)
+                    toRemove.add(contract);
             }
-        }).start();
+
+            for (AbstractContract contract : toRemove)
+            {
+                removeContract(contract);
+            }
+
+            // wait 30 seconds until our next sweep
+            LockSupport.parkNanos(TimeUnit.SECONDS.toNanos(30));
+        }
     }
 
     public void shutdown()
     {
         running = false;
+        interrupt();
     }
 
     public void addContract(AbstractContract contract) throws IOException
