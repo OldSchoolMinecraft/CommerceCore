@@ -2,10 +2,7 @@ package net.oldschoolminecraft.cc;
 
 import net.oldschoolminecraft.cc.api.AccountResolver;
 import net.oldschoolminecraft.cc.api.DefaultAccountResolver;
-import net.oldschoolminecraft.cc.commands.BusinessCmd;
-import net.oldschoolminecraft.cc.commands.ExchangeCmd;
-import net.oldschoolminecraft.cc.commands.LoansCmd;
-import net.oldschoolminecraft.cc.commands.TrusteesCmd;
+import net.oldschoolminecraft.cc.commands.*;
 import net.oldschoolminecraft.cc.managers.BankManager;
 import net.oldschoolminecraft.cc.managers.BusinessManager;
 import net.oldschoolminecraft.cc.managers.ContractManager;
@@ -49,6 +46,7 @@ public class CommerceCore extends JavaPlugin
             return;
         }
 
+        getCommand("commercecore").setExecutor(new AdminCmd(this));
         getCommand("business").setExecutor(new BusinessCmd(this));
         getCommand("loans").setExecutor(new LoansCmd(this));
         getCommand("trustees").setExecutor(new TrusteesCmd(this));

@@ -3,10 +3,12 @@ package net.oldschoolminecraft.cc.managers;
 import net.oldschoolminecraft.cc.CommerceCore;
 import net.oldschoolminecraft.cc.api.AccountRef;
 import net.oldschoolminecraft.cc.api.AccountResolver;
+import net.oldschoolminecraft.cc.api.EssentialsAccount;
 import net.oldschoolminecraft.cc.api.NamedMutableBalance;
 import net.oldschoolminecraft.cc.data.ExchangeOrder;
 import net.oldschoolminecraft.cc.util.Database;
 import org.bukkit.Bukkit;
+import org.bukkit.ChatColor;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.PlayerInventory;
@@ -94,6 +96,22 @@ public class ExchangeManager extends Thread
                     created_at INTEGER NOT NULL
                 )
                 """);
+
+            st.execute("""
+                CREATE TABLE IF NOT EXISTS exchange_order_history (
+                    id TEXT PRIMARY KEY,
+                    type TEXT NOT NULL,
+                    owner_kind TEXT NOT NULL,
+                    owner_name TEXT NOT NULL,
+                    item_type_id INTEGER NOT NULL,
+                    item_data INTEGER NOT NULL,
+                    quantity INTEGER NOT NULL,
+                    remaining INTEGER NOT NULL,
+                    price REAL NOT NULL,
+                    status TEXT NOT NULL,
+                    created_at INTEGER NOT NULL
+                )
+                """);
         }
     }
 
@@ -176,9 +194,20 @@ public class ExchangeManager extends Thread
     private void insertOrder(ExchangeOrder.Type type, AccountRef owner, int itemTypeId, short itemData,
                              int quantity, double price) throws SQLException
     {
-        String sql = "INSERT INTO exchange_orders " +
-                "(id, type, owner_kind, owner_name, item_type_id, item_data, quantity, remaining, price, status, created_at) " +
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+        insertOrder(type, owner, itemTypeId, itemData, quantity, price, false);
+    }
+
+    private void insertOrder(ExchangeOrder.Type type, AccountRef owner, int itemTypeId, short itemData,
+                             int quantity, double price, boolean archive) throws SQLException
+    {
+        StringBuilder queryBuilder = new StringBuilder();
+
+        queryBuilder.append("INSERT INTO").append(" ");
+        queryBuilder.append(archive ? "exchange_order_history" : "exchange_orders").append(" ");
+        queryBuilder.append("(id, type, owner_kind, owner_name, item_type_id, item_data, quantity, remaining, price, status, created_at)").append(" ");
+        queryBuilder.append("VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+
+        String sql = queryBuilder.toString();
 
         try (PreparedStatement ps = dbHandle.connection().prepareStatement(sql))
         {
@@ -224,9 +253,7 @@ public class ExchangeManager extends Thread
 
                 updateOrderStatus(orderId, ExchangeOrder.Status.CANCELLED, 0);
                 return true;
-            }
-            catch (SQLException e)
-            {
+            } catch (SQLException e) {
                 plugin.getLogger().warning("Failed to cancel order #" + orderId + ": " + e.getMessage());
                 return false;
             }
@@ -297,6 +324,35 @@ public class ExchangeManager extends Thread
         return orders;
     }
 
+    private void archiveFulfilledOrders() throws SQLException
+    {
+        List<ExchangeOrder> orders = new ArrayList<>();
+        String sql = "SELECT * FROM exchange_orders WHERE status = ?";
+
+        try (PreparedStatement ps = dbHandle.connection().prepareStatement(sql))
+        {
+            ps.setString(1, ExchangeOrder.Status.FULFILLED.name());
+            try (ResultSet rs = ps.executeQuery())
+            {
+                while (rs.next())
+                    orders.add(readOrder(rs));
+            }
+        }
+
+        for (ExchangeOrder order : orders)
+        {
+            insertOrder(order.getType(), order.getOwner(), order.getItemTypeId(), order.getItemData(), order.getQuantity(), order.getPrice(), true);
+        }
+
+        sql = "DELETE FROM exchange_orders WHERE status = ?";
+        try (PreparedStatement ps = dbHandle.connection().prepareStatement(sql))
+        {
+            ps.setString(1, ExchangeOrder.Status.FULFILLED.name());
+            if (!ps.execute())
+                System.err.println("[CommerceCore] Failed to clear fulfilled orders after archiving!");
+        }
+    }
+
     private ExchangeOrder readOrder(ResultSet rs) throws SQLException
     {
         AccountRef owner = "PLAYER".equals(rs.getString("owner_kind"))
@@ -343,6 +399,7 @@ public class ExchangeManager extends Thread
                 synchronized (lock)
                 {
                     matchOrders();
+                    cleanupOrders();
                 }
             } catch (Exception e) {
                 plugin.getLogger().warning("Exchange matching tick failed: " + e.getMessage());
@@ -390,6 +447,33 @@ public class ExchangeManager extends Thread
         }
     }
 
+    private void cleanupOrders()
+    {
+        // hand out queued items that couldn't be collected for whatever reason
+        for (Player player : Bukkit.getOnlinePlayers())
+        {
+            AccountRef ref = AccountRef.of(new EssentialsAccount(player.getName()));
+            collectPendingItems(ref);
+        }
+
+        try
+        {
+            // delete cancelled orders
+            String sql = "DELETE FROM exchange_orders WHERE status = ?";
+            try (PreparedStatement ps = dbHandle.connection().prepareStatement(sql))
+            {
+                ps.setString(1, ExchangeOrder.Status.CANCELLED.name());
+                if (!ps.execute())
+                    System.err.println("[CommerceCore] Failed to cleanup cancelled orders from exchange database!");
+            }
+
+            // archive fulfilled orders into separate table
+            archiveFulfilledOrders();
+        } catch (SQLException ex) {
+            ex.printStackTrace(System.err);
+        }
+    }
+
     private void executeTrade(ExchangeOrder buy, ExchangeOrder sell, int quantity)
     {
         double executionPrice = sell.getPrice(); // fill at the seller's asking price
@@ -402,16 +486,46 @@ public class ExchangeManager extends Thread
             NamedMutableBalance sellerBalance = accountResolver.resolve(sell.getOwner());
             sellerBalance.add(sellerProceeds);
 
+            Player buyerPlayer = Bukkit.getPlayerExact(buy.getOwner().getName());
+            Player sellerPlayer = Bukkit.getPlayer(sell.getOwner().getName());
+
+            if (sellerPlayer != null && sellerPlayer.isOnline())
+            {
+                sellerPlayer.sendMessage(ChatColor.translateAlternateColorCodes('&',
+                        String.format("&aYou received &8$%.2f&a from your sell order: &7#%s",
+                        sellerProceeds,
+                        sell.getId())
+                ));
+            }
+
             // 2. Refund the buyer the unused portion of their max-price escrow.
             if (buyerRefund > 0)
             {
                 NamedMutableBalance buyerBalance = accountResolver.resolve(buy.getOwner());
                 buyerBalance.add(buyerRefund);
+
+                if (buyerPlayer != null && buyerPlayer.isOnline())
+                {
+                    buyerPlayer.sendMessage(ChatColor.translateAlternateColorCodes('&',
+                            String.format("&aYou were refunded &8$%.2f from your buy order: &7#%s",
+                            buyerRefund,
+                            buy.getId())
+                    ));
+                }
             }
 
             // 3. Deliver the items to the buyer.
-            Player buyerPlayer = Bukkit.getPlayerExact(buy.getOwner().getName());
             giveOrQueue(buy.getOwner(), buyerPlayer, buy.getItemTypeId(), buy.getItemData(), quantity);
+
+            if (buyerPlayer != null && buyerPlayer.isOnline())
+            {
+                String receivedItemsStr = buy.getItemTypeId() + " &8x" + quantity;
+                buyerPlayer.sendMessage(ChatColor.translateAlternateColorCodes('&',
+                        String.format("&aYou received &e%s&a from your buy order: &7#%s",
+                        receivedItemsStr,
+                        buy.getId())
+                ));
+            }
 
             // 4. Persist the new remaining/status for both orders.
             buy.setRemaining(buy.getRemaining() - quantity);
