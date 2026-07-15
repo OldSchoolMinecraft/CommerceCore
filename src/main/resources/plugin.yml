@@ -3,6 +3,9 @@ version: 1.0
 author: moderator_man
 main: net.oldschoolminecraft.cc.CommerceCore
 commands:
+  commercecore:
+    description: CommerceCore admin commands
+    default: op
   business:
     description: Manage your business
     usage: /business

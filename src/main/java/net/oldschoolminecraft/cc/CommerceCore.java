@@ -8,6 +8,7 @@ import net.oldschoolminecraft.cc.managers.BusinessManager;
 import net.oldschoolminecraft.cc.managers.ContractManager;
 import net.oldschoolminecraft.cc.managers.ExchangeManager;
 import net.oldschoolminecraft.cc.util.CoreConfig;
+import net.oldschoolminecraft.cc.util.ItemDb;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.io.File;
@@ -20,6 +21,7 @@ public class CommerceCore extends JavaPlugin
 
     private AccountResolver accountResolver;
     private CoreConfig config;
+    private ItemDb itemDb;
 
     private BusinessManager businessManager;
     private BankManager bankManager;
@@ -32,6 +34,8 @@ public class CommerceCore extends JavaPlugin
 
         accountResolver = new DefaultAccountResolver(this);
         config = new CoreConfig(new File(getDataFolder(), "config.yml"));
+        itemDb = new ItemDb(this);
+        itemDb.reloadConfig();
 
         businessManager = new BusinessManager(this, new File(getDataFolder(), "business-data/"));
         bankManager = new BankManager(new File(getDataFolder(), "bank-data/"));
@@ -104,5 +108,10 @@ public class CommerceCore extends JavaPlugin
     public CoreConfig getConfig()
     {
         return config;
+    }
+
+    public ItemDb getItemDb()
+    {
+        return itemDb;
     }
 }

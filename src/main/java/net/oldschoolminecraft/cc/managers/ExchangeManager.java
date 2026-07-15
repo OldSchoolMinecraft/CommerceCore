@@ -348,8 +348,7 @@ public class ExchangeManager extends Thread
         try (PreparedStatement ps = dbHandle.connection().prepareStatement(sql))
         {
             ps.setString(1, ExchangeOrder.Status.FULFILLED.name());
-            if (!ps.execute())
-                System.err.println("[CommerceCore] Failed to clear fulfilled orders after archiving!");
+            ps.execute();
         }
     }
 
@@ -433,7 +432,7 @@ public class ExchangeManager extends Thread
                 if (sell.getPrice() > buy.getPrice())
                     continue; // sell orders are sorted ascending, but keep the guard explicit
                 if (buy.getOwner().equals(sell.getOwner()))
-                    continue; // don't let a player trade with themself
+                    continue; // don't let a player trade with themselves
 
                 int tradeQty = Math.min(buy.getRemaining(), sell.getRemaining());
                 if (tradeQty <= 0)
@@ -463,8 +462,7 @@ public class ExchangeManager extends Thread
             try (PreparedStatement ps = dbHandle.connection().prepareStatement(sql))
             {
                 ps.setString(1, ExchangeOrder.Status.CANCELLED.name());
-                if (!ps.execute())
-                    System.err.println("[CommerceCore] Failed to cleanup cancelled orders from exchange database!");
+                ps.execute();
             }
 
             // archive fulfilled orders into separate table
@@ -492,7 +490,7 @@ public class ExchangeManager extends Thread
             if (sellerPlayer != null && sellerPlayer.isOnline())
             {
                 sellerPlayer.sendMessage(ChatColor.translateAlternateColorCodes('&',
-                        String.format("&aYou received &8$%.2f&a from your sell order: &7#%s",
+                        String.format("&aYou received &7$%.2f&a from your sell order: &7#%s",
                         sellerProceeds,
                         sell.getId())
                 ));
@@ -507,7 +505,7 @@ public class ExchangeManager extends Thread
                 if (buyerPlayer != null && buyerPlayer.isOnline())
                 {
                     buyerPlayer.sendMessage(ChatColor.translateAlternateColorCodes('&',
-                            String.format("&aYou were refunded &8$%.2f from your buy order: &7#%s",
+                            String.format("&aYou were refunded &e$%.2f&a from your buy order: &7#%s",
                             buyerRefund,
                             buy.getId())
                     ));
@@ -519,9 +517,9 @@ public class ExchangeManager extends Thread
 
             if (buyerPlayer != null && buyerPlayer.isOnline())
             {
-                String receivedItemsStr = buy.getItemTypeId() + " &8x" + quantity;
+                String receivedItemsStr = plugin.getItemDb().getName(buy.getItemTypeId(), buy.getItemData()) + " x" + quantity;
                 buyerPlayer.sendMessage(ChatColor.translateAlternateColorCodes('&',
-                        String.format("&aYou received &e%s&a from your buy order: &7#%s",
+                        String.format("&aYou received &7%s&a from your buy order: &7#%s",
                         receivedItemsStr,
                         buy.getId())
                 ));

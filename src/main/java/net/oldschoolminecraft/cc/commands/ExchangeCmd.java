@@ -11,6 +11,7 @@ import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
+import org.bukkit.inventory.ItemStack;
 
 import java.util.List;
 
@@ -18,13 +19,13 @@ public class ExchangeCmd implements CommandExecutor
 {
     private static final int ORDERS_PER_PAGE = 8;
 
-    private final CommerceCore plugin;
+    private static CommerceCore plugin;
     private final ExchangeManager exchangeManager;
     private final AccountResolver accountResolver;
 
-    public ExchangeCmd(CommerceCore plugin)
+    public ExchangeCmd(CommerceCore commerceCore)
     {
-        this.plugin = plugin;
+        plugin = commerceCore;
         this.exchangeManager = plugin.getExchangeManager();
         this.accountResolver = plugin.getAccountResolver();
     }
@@ -220,17 +221,18 @@ public class ExchangeCmd implements CommandExecutor
         @Override
         public String toString()
         {
-            return typeId + (data != 0 ? ":" + data : "");
+            return plugin.getItemDb().getName(typeId, data);
         }
     }
 
     private String itemLabel(int typeId, short data)
     {
-        return typeId + (data != 0 ? ":" + data : "");
+        return plugin.getItemDb().getName(typeId, data);
     }
 
     /**
      * Accepts "<typeId>" or "<typeId>:<data>", e.g. "35" or "35:2".
+     * Also accepts item name using Essentials ItemDb
      */
     private ItemSpec parseItem(CommandSender sender, String raw)
     {
@@ -243,8 +245,14 @@ public class ExchangeCmd implements CommandExecutor
             }
             return new ItemSpec(Integer.parseInt(raw), (short) 0);
         } catch (NumberFormatException e) {
-            msg(sender, "&cInvalid item, expected a numeric item id (optionally '<id>:<data>').");
-            return null;
+            try
+            {
+                ItemStack stack = plugin.getItemDb().get(raw);
+                return new ItemSpec(stack.getTypeId(), stack.getDurability());
+            } catch (Exception ex) {
+                msg(sender, "&cFailed to find item by that name (or ID).");
+                return null;
+            }
         }
     }
 
