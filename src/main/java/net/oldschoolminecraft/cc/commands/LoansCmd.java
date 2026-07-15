@@ -21,6 +21,8 @@ import org.bukkit.entity.Player;
 
 import java.io.IOException;
 import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 
 public class LoansCmd implements CommandExecutor
 {
@@ -68,7 +70,7 @@ public class LoansCmd implements CommandExecutor
         if (subcmd.equalsIgnoreCase("contract"))
         {
             boolean businessLoan = label.equalsIgnoreCase("b-loan");
-            Business business = plugin.getBusinessManager().getByOwner(ply.getName());
+            Business business = businessLoan ? plugin.getBusinessManager().getByOwner(ply.getName()) : null;
 
             if (businessLoan && business == null)
             {
@@ -82,7 +84,7 @@ public class LoansCmd implements CommandExecutor
                 argumentOffset++;
 
             String accountName = args[1];
-            BankAccount bankAccount = plugin.getBankManager().getAccount(business.name, accountName);
+            BankAccount bankAccount = businessLoan ? plugin.getBankManager().getAccount(business.name, accountName) : null;
 
             NamedMutableBalance lender = businessLoan ? bankAccount : new EssentialsAccount(ply.getName());
             NamedMutableBalance borrower = new EssentialsAccount(args[1 + argumentOffset]);
@@ -191,13 +193,16 @@ public class LoansCmd implements CommandExecutor
                 return true;
             }
 
+            DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy/MM/dd hh:mm a")
+                    .withZone(ZoneId.systemDefault());
+
             ply.sendMessage(ChatColor.YELLOW + String.format("Principal: $%.2f", loanContract.getPrincipal()));
             ply.sendMessage(ChatColor.YELLOW + String.format("Remaining balance: $%.2f", loanContract.getRemainingBalance()));
-            ply.sendMessage(ChatColor.YELLOW + String.format("Deadline: %s", loanContract.getRepaymentDeadline()));
+            ply.sendMessage(ChatColor.YELLOW + String.format("Deadline: %s", formatter.format(loanContract.getRepaymentDeadline())));
 
             double suggested = loanContract.getSuggestedPeriodicPayment(7); // weekly reference plan
             ply.sendMessage(ChatColor.GRAY + String.format(
-                    "Suggested (optional): $%.2f every 7 days would clear this by the deadline.", suggested));
+                    "Suggested: $%.2f every 7 days would clear this by the deadline.", suggested));
 
             return true;
         }

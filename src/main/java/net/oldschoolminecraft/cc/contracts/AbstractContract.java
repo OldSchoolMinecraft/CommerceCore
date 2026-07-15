@@ -17,7 +17,7 @@ public abstract class AbstractContract
 {
     private final ContractType contractType;
     private final UUID contractId;
-    private final Instant createdAt;
+    private final long createdAt;
     private ContractStatus status;
 
     /**
@@ -32,7 +32,7 @@ public abstract class AbstractContract
     {
         this.contractType = type;
         this.contractId = UUID.randomUUID();
-        this.createdAt = Instant.now();
+        this.createdAt = Instant.now().toEpochMilli();
         this.status = ContractStatus.PENDING;
     }
 
@@ -48,7 +48,7 @@ public abstract class AbstractContract
 
     public final Instant getCreatedAt()
     {
-        return createdAt;
+        return Instant.ofEpochMilli(createdAt);
     }
 
     public final ContractStatus getStatus()

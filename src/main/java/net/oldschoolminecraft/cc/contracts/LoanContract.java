@@ -15,12 +15,12 @@ public final class LoanContract extends AbstractContract
     private final AccountRef borrower;
     private final double principal;       // fixed, original loan size -- for display only
     private final double interestRate;    // fraction over full term, e.g. 0.02
-    private final Instant repaymentDeadline;
+    private final long repaymentDeadline;
 
     private boolean fundedByLender;
     private boolean repaidByBorrower;
     private double amountRepaid;          // cumulative, for display/stats only
-    private Instant fundedAt;
+    private long fundedAt;
 
     private double outstandingBalance;    // what's actually still owed -- shrinks on repay(), grows on accrual
     private long daysAccruedSoFar;        // whole days of compounding already folded into outstandingBalance
@@ -42,7 +42,7 @@ public final class LoanContract extends AbstractContract
         this.borrower = AccountRef.of(borrower);
         this.principal = principal;
         this.interestRate = interestRate;
-        this.repaymentDeadline = repaymentDeadline;
+        this.repaymentDeadline = repaymentDeadline.toEpochMilli();
         this.fundedByLender = false;
         this.repaidByBorrower = false;
         this.amountRepaid = 0D;
@@ -54,7 +54,7 @@ public final class LoanContract extends AbstractContract
     {
         requireStatus(ContractStatus.PENDING);
         this.fundedByLender = true;
-        this.fundedAt = Instant.now();
+        this.fundedAt = Instant.now().toEpochMilli();
         transitionTo(ContractStatus.ACTIVE);
     }
 
@@ -87,7 +87,7 @@ public final class LoanContract extends AbstractContract
 
     private long daysSinceFundingCapped(long totalDays)
     {
-        long daysSinceFunding = Duration.between(fundedAt, Instant.now()).toDays();
+        long daysSinceFunding = Duration.between(Instant.ofEpochMilli(fundedAt), Instant.now()).toDays();
         if (daysSinceFunding < 0) daysSinceFunding = 0;
         return Math.min(daysSinceFunding, totalDays);
     }
@@ -95,10 +95,10 @@ public final class LoanContract extends AbstractContract
     /** Pure read -- projects the balance with pending interest folded in, without mutating state. */
     private double projectCurrentBalance()
     {
-        if (fundedAt == null || interestRate == 0D)
+        if (interestRate == 0D)
             return outstandingBalance;
 
-        long totalDays = Duration.between(fundedAt, repaymentDeadline).toDays();
+        long totalDays = Duration.between(Instant.ofEpochMilli(fundedAt), Instant.ofEpochMilli(repaymentDeadline)).toDays();
         if (totalDays <= 0)
             return outstandingBalance;
 
@@ -114,10 +114,10 @@ public final class LoanContract extends AbstractContract
     /** Mutating -- folds interest since the last checkpoint into outstandingBalance. */
     private void accrueToNow()
     {
-        if (fundedAt == null || interestRate == 0D)
+        if (interestRate == 0D)
             return;
 
-        long totalDays = Duration.between(fundedAt, repaymentDeadline).toDays();
+        long totalDays = Duration.between(Instant.ofEpochMilli(fundedAt), Instant.ofEpochMilli(repaymentDeadline)).toDays();
         if (totalDays <= 0)
             return;
 
@@ -163,13 +163,13 @@ public final class LoanContract extends AbstractContract
         if (remaining <= 0D)
             return 0D;
 
-        long daysLeft = Duration.between(Instant.now(), repaymentDeadline).toDays();
+        long daysLeft = Duration.between(Instant.now(), Instant.ofEpochMilli(repaymentDeadline)).toDays();
         if (daysLeft <= 0)
             return remaining;
 
         int numberOfPayments = (int) Math.max(1, Math.ceil((double) daysLeft / intervalDays));
 
-        long totalDays = Duration.between(fundedAt != null ? fundedAt : Instant.now(), repaymentDeadline).toDays();
+        long totalDays = Duration.between(Instant.ofEpochMilli(fundedAt), Instant.ofEpochMilli(repaymentDeadline)).toDays();
         double dailyRate = dailyCompoundRate(Math.max(totalDays, 1));
         double intervalRate = Math.pow(1.0 + dailyRate, intervalDays) - 1.0;
 
@@ -193,7 +193,7 @@ public final class LoanContract extends AbstractContract
             transitionTo(ContractStatus.COMPLETED);
             return;
         }
-        if (Instant.now().isAfter(repaymentDeadline))
+        if (Instant.now().isAfter(Instant.ofEpochMilli(repaymentDeadline)))
             transitionTo(ContractStatus.DEFAULTED);
     }
 
@@ -243,12 +243,12 @@ public final class LoanContract extends AbstractContract
     public NamedMutableBalance getResolvedBorrower() { return resolver().resolve(borrower); }
     public double getPrincipal() { return principal; }
     public double getInterestRate() { return interestRate; }
-    public Instant getRepaymentDeadline() { return repaymentDeadline; }
+    public Instant getRepaymentDeadline() { return Instant.ofEpochMilli(repaymentDeadline); }
     public boolean isFundedByLender() { return fundedByLender; }
     public boolean isRepaidByBorrower() { return repaidByBorrower; }
     public double getAmountRepaid() { return amountRepaid; }
     public double getRemainingBalance() { return Math.max(0D, projectCurrentBalance()); }
-    public boolean isOverdue() { return getStatus() == ContractStatus.ACTIVE && Instant.now().isAfter(repaymentDeadline); }
+    public boolean isOverdue() { return getStatus() == ContractStatus.ACTIVE && Instant.now().isAfter(Instant.ofEpochMilli(repaymentDeadline)); }
 
     @Override
     public String toString()
